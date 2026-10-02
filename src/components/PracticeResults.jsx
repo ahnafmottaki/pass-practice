@@ -285,21 +285,21 @@ export default function PracticeResults({
       </div>
 
       {/* Action Footer */}
-      <div className="p-5 rounded-2xl glass-panel border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+      <div className="p-4 sm:p-5 rounded-2xl glass-panel border border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 sm:gap-4">
         <button
           type="button"
           onClick={onReturnToPasswords}
-          className="px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+          className="order-3 sm:order-1 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-medium text-slate-300 hover:bg-slate-800 transition-colors text-center"
         >
           Back to Passwords
         </button>
 
-        <div className="flex items-center gap-3 ml-auto">
+        <div className="order-1 sm:order-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
           {failedTasks.length > 0 && (
             <button
               type="button"
               onClick={() => onRetryFailed(failedTasks.map((t) => t.passwordItem))}
-              className="px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs sm:text-sm font-bold flex items-center gap-2 transition-all"
+              className="px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all"
             >
               <RotateCcw className="w-4 h-4" />
               <span>Drill Failed Only ({failedTasks.length})</span>
@@ -309,7 +309,7 @@ export default function PracticeResults({
           <button
             type="button"
             onClick={onRetryAll}
-            className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold text-xs sm:text-sm flex items-center gap-2 shadow-lg shadow-brand-500/20 transition-all active:scale-95"
+            className="px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-400 text-slate-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 transition-all active:scale-95"
           >
             <RotateCcw className="w-4 h-4 stroke-[3]" />
             <span>Practice Again</span>

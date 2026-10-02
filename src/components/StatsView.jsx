@@ -63,14 +63,14 @@ export default function StatsView({ onGoToPractice }) {
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 pb-4 border-b border-slate-800">
         <div>
-          <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2.5">
-            <BarChart3 className="w-6 h-6 text-brand-400" />
+          <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center gap-2 sm:gap-2.5">
+            <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-brand-400 shrink-0" />
             <span>Training Statistics & Logs</span>
           </h2>
           <p className="text-xs sm:text-sm text-slate-400 mt-1">
-            Historical muscle memory retention metrics stored permanently in your local SQLite database.
+            Historical muscle memory retention metrics and practice logs.
           </p>
         </div>
         <div className="flex items-center gap-2 self-start sm:self-auto">
@@ -97,9 +97,9 @@ export default function StatsView({ onGoToPractice }) {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Total Sessions */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800/80">
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold">Total Sessions</span>
             <Award className="w-4 h-4 text-purple-400" />
@@ -113,7 +113,7 @@ export default function StatsView({ onGoToPractice }) {
         </div>
 
         {/* Success Rate */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800/80">
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold">Success Rate</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -127,7 +127,7 @@ export default function StatsView({ onGoToPractice }) {
         </div>
 
         {/* Avg Accuracy */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800/80">
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold">Avg Accuracy</span>
             <Target className="w-4 h-4 text-cyan-400" />
@@ -141,7 +141,7 @@ export default function StatsView({ onGoToPractice }) {
         </div>
 
         {/* Top Speed */}
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800/80">
+        <div className="glass-panel p-3.5 sm:p-5 rounded-xl sm:rounded-2xl border border-slate-800/80">
           <div className="flex items-center justify-between text-slate-400 mb-2">
             <span className="text-xs font-semibold">Best Speed</span>
             <Zap className="w-4 h-4 text-amber-400" />
@@ -176,7 +176,7 @@ export default function StatsView({ onGoToPractice }) {
         ) : (
           <div className="glass-panel rounded-2xl border border-slate-800/80 overflow-hidden">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[500px]">
                 <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
                   <tr>
                     <th className="py-3 px-4">Session Date</th>

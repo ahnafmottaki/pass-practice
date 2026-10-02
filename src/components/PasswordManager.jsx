@@ -106,23 +106,25 @@ export default function PasswordManager({
   return (
     <div className="space-y-8 animate-in fade-in duration-200">
       {/* Top Banner & Context Note */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-brand-950/40 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <span>Password Repository</span>
-            <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900/90 to-brand-950/40 border border-slate-800 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
+            <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+              Password Repository
+            </h2>
+            <span className="text-[11px] sm:text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono whitespace-nowrap">
               Anonymous Storage
             </span>
-          </h2>
-          <p className="text-xs sm:text-sm text-slate-400 mt-1 max-w-2xl">
+          </div>
+          <p className="text-xs sm:text-sm text-slate-400 mt-1.5 max-w-2xl leading-relaxed">
             Store raw password strings to practice memory and typing fluency. 
             No service tags (no Google, Facebook, etc.). Duplicate passwords are strictly prohibited.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="text-right">
-            <span className="text-2xl font-black font-mono text-brand-400">{passwords.length}</span>
-            <span className="text-xs text-slate-400 block">Total Stored</span>
+        <div className="flex items-center gap-2 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-800/80 justify-between md:justify-end">
+          <div className="flex md:block items-baseline gap-2 md:text-right">
+            <span className="text-2xl sm:text-3xl font-black font-mono text-brand-400 leading-none">{passwords.length}</span>
+            <span className="text-xs text-slate-400 block font-medium">Total Stored</span>
           </div>
         </div>
       </div>
@@ -211,14 +213,14 @@ export default function PasswordManager({
             </div>
           )}
 
-          <div className="flex items-center justify-between pt-1">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 pt-1">
             <span className="text-xs text-slate-500 hidden sm:inline">
               Saved locally to your machine with zero server logins.
             </span>
             <button
               type="submit"
               disabled={submitting || isDuplicate || !newPassword.trim()}
-              className="ml-auto px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm flex items-center gap-2 shadow-lg shadow-brand-500/20 transition-all active:scale-95"
+              className="w-full sm:w-auto ml-0 sm:ml-auto px-5 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-brand-500/20 transition-all active:scale-95"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
               <span>{submitting ? 'Saving...' : 'Save Password'}</span>
@@ -230,9 +232,9 @@ export default function PasswordManager({
       {/* Passwords List Section */}
       <div className="space-y-4">
         {/* Controls Bar: Search & Batch Selection */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 sm:gap-3">
           {/* Search */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative flex-1 sm:max-w-md">
             <Search className="w-4 h-4 text-slate-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
             <input
               type="text"
@@ -245,7 +247,7 @@ export default function PasswordManager({
 
           {/* Selection Actions */}
           {passwords.length > 0 && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between sm:justify-start gap-2 text-xs">
               <button
                 type="button"
                 onClick={onSelectAll}
@@ -311,24 +313,24 @@ export default function PasswordManager({
                   }`}
                 >
                   {/* Top Bar: Checkbox & Actions */}
-                  <div className="flex items-center justify-between gap-2 mb-3">
+                  <div className="flex items-center justify-between gap-2 mb-3 min-w-0">
                     <button
                       type="button"
                       onClick={() => onToggleSelect(item.id)}
-                      className="flex items-center gap-2 text-xs font-medium text-slate-300 hover:text-white"
+                      className="flex items-center gap-1.5 sm:gap-2 text-xs font-medium text-slate-300 hover:text-white min-w-0 truncate"
                     >
                       {isSelected ? (
-                        <CheckSquare className="w-4 h-4 text-brand-400" />
+                        <CheckSquare className="w-4 h-4 text-brand-400 shrink-0" />
                       ) : (
-                        <Square className="w-4 h-4 text-slate-600" />
+                        <Square className="w-4 h-4 text-slate-600 shrink-0" />
                       )}
-                      <span className="font-mono text-slate-500">#{idx + 1}</span>
-                      <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/50">
+                      <span className="font-mono text-slate-500 shrink-0">#{idx + 1}</span>
+                      <span className="text-[11px] px-1.5 sm:px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700/50 truncate">
                         {item.password.length} chars
                       </span>
                     </button>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       {/* Quick practice this specific password */}
                       <button
                         type="button"
@@ -337,7 +339,7 @@ export default function PasswordManager({
                         className="px-2 py-1 rounded-md bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 border border-brand-500/20 text-xs font-semibold flex items-center gap-1 transition-colors"
                       >
                         <Zap className="w-3 h-3 text-amber-400" />
-                        <span>Practice</span>
+                        <span className="hidden xs:inline">Practice</span>
                       </button>
 
                       {/* Edit */}

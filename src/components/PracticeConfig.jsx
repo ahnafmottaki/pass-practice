@@ -183,7 +183,7 @@ export default function PracticeConfig({
                   <p className="text-xs text-slate-400">How many times would you like to practice each password?</p>
                 </div>
                 {/* Scope selector */}
-                <div className="flex items-center rounded-xl bg-slate-950 p-1 border border-slate-800">
+                <div className="flex flex-col xs:flex-row items-stretch xs:items-center rounded-xl bg-slate-950 p-1 border border-slate-800 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setActiveMode('count_all')}
@@ -210,7 +210,7 @@ export default function PracticeConfig({
               </div>
 
               {/* Repetition presets */}
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex flex-wrap items-center gap-2 pt-2">
                 {[1, 3, 5, 10].map((num) => (
                   <button
                     key={num}
@@ -244,15 +244,15 @@ export default function PracticeConfig({
           {/* Password Picker (Shown if Selected Mode is active) */}
           {isSelectedMode && (
             <div className="glass-panel p-5 rounded-2xl space-y-4 animate-in fade-in">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
                 <div>
-                  <h4 className="text-sm font-semibold text-white flex items-center gap-2">
-                    <CheckSquare className="w-4 h-4 text-brand-400" />
-                    <span>Select Passwords to Practice ({selectedIds.length} of {passwords.length})</span>
+                  <h4 className="text-sm font-semibold text-white flex flex-wrap items-center gap-2">
+                    <CheckSquare className="w-4 h-4 text-brand-400 shrink-0" />
+                    <span>Select Passwords ({selectedIds.length} of {passwords.length})</span>
                   </h4>
-                  <p className="text-xs text-slate-400">Check the specific passwords you want to drill.</p>
+                  <p className="text-xs text-slate-400 mt-0.5">Check the specific passwords you want to drill.</p>
                 </div>
-                <div className="flex items-center gap-2 text-xs">
+                <div className="flex items-center gap-2 text-xs self-start sm:self-auto">
                   <button
                     type="button"
                     onClick={onSelectAll}
@@ -390,9 +390,9 @@ export default function PracticeConfig({
           </div>
 
           {/* Launch Action */}
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-brand-950/60 via-slate-900 to-slate-900 border border-brand-500/30 flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-bold text-white flex items-center gap-2">
+          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-brand-950/60 via-slate-900 to-slate-900 border border-brand-500/30 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+            <div className="text-center sm:text-left">
+              <div className="text-sm font-bold text-white flex flex-wrap items-center justify-center sm:justify-start gap-1.5 sm:gap-2">
                 <span>Ready to Practice:</span>
                 <span className="font-mono text-brand-400">
                   {candidatePasswords.length} Password{candidatePasswords.length !== 1 ? 's' : ''}

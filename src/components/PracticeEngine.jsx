@@ -319,31 +319,49 @@ export default function PracticeEngine({
   return (
     <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-200">
       {/* Top Header: Progress & Modes */}
-      <div className="glass-panel p-4 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20">
-            <KeyRound className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                {modeType.startsWith('time') ? 'Time-Based Practice' : 'Count-Based Drill'}
-              </span>
-              <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">
-                {currentIndex + 1} of {taskQueue.length}
-              </span>
+      <div className="glass-panel p-3.5 sm:p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center justify-between sm:justify-start gap-3 w-full sm:w-auto">
+          <div className="flex items-center gap-2.5 sm:gap-3">
+            <div className="p-2 sm:p-2.5 rounded-xl bg-brand-500/10 text-brand-400 border border-brand-500/20 shrink-0">
+              <KeyRound className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            {currentTask && modeType.startsWith('count') && (
-              <p className="text-xs text-purple-400 font-medium mt-0.5">
-                Repetition {currentTask.repetition} of {currentTask.totalReps}
-              </p>
-            )}
+            <div>
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <span className="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-slate-400">
+                  {modeType.startsWith('time') ? 'Time Drill' : 'Count Drill'}
+                </span>
+                <span className="text-xs font-mono px-2 py-0.5 rounded-md bg-slate-800 text-slate-300">
+                  {currentIndex + 1} of {taskQueue.length}
+                </span>
+              </div>
+              {currentTask && modeType.startsWith('count') && (
+                <p className="text-xs text-purple-400 font-medium mt-0.5">
+                  Repetition {currentTask.repetition} of {currentTask.totalReps}
+                </p>
+              )}
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (confirm('Exit practice session early? Completed items will be logged.')) {
+                if (sessionResults.length > 0) {
+                  onFinishSession(sessionResults);
+                } else {
+                  onCancelPractice();
+                }
+              }
+            }}
+            className="sm:hidden px-2.5 py-1 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors shrink-0"
+          >
+            End
+          </button>
         </div>
 
         {/* 30s Countdown Timer Widget (If Time-Based Mode) */}
         {isTimeBased && (
-          <div className="flex items-center gap-3 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800">
+          <div className="flex items-center justify-center gap-3 bg-slate-950 px-4 py-2 rounded-xl border border-slate-800 w-full sm:w-auto">
             <Timer className={`w-4 h-4 ${timeRemaining <= 5 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`} />
             <div className="flex items-baseline gap-1">
               <span className={`text-xl font-black font-mono tracking-tight ${
@@ -368,7 +386,7 @@ export default function PracticeEngine({
               }
             }
           }}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors"
+          className="hidden sm:inline-flex px-3 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 border border-slate-800 transition-colors"
         >
           End Session
         </button>
@@ -384,7 +402,7 @@ export default function PracticeEngine({
 
       {/* Main Focus Typing Arena */}
       <div 
-        className={`glass-panel p-6 sm:p-10 rounded-3xl transition-all duration-300 relative border-2 ${
+        className={`glass-panel p-4 sm:p-10 rounded-2xl sm:rounded-3xl transition-all duration-300 relative border-2 ${
           isSuccessFlash 
             ? 'border-emerald-500 bg-emerald-950/20 shadow-2xl shadow-emerald-500/20' 
             : isTimedOut
@@ -424,13 +442,13 @@ export default function PracticeEngine({
           </div>
 
           {/* Password Display Box */}
-          <div className="inline-flex items-center gap-3 px-6 py-3 rounded-2xl bg-slate-950/90 border border-slate-800/80 shadow-inner max-w-full overflow-x-auto">
+          <div className="inline-flex items-center gap-2 sm:gap-3 px-4 sm:px-6 py-2.5 sm:py-3 rounded-2xl bg-slate-950/90 border border-slate-800/80 shadow-inner max-w-full overflow-x-auto">
             {isPeeking || !blindRecall || isTimedOut ? (
-              <div className="font-mono-code text-xl sm:text-2xl tracking-widest text-white select-all">
+              <div className="font-mono-code text-lg sm:text-2xl tracking-widest text-white select-all break-all">
                 {currentTarget}
               </div>
             ) : (
-              <div className="font-mono-code text-xl sm:text-2xl tracking-widest text-slate-500 select-none">
+              <div className="font-mono-code text-lg sm:text-2xl tracking-widest text-slate-500 select-none">
                 {'•'.repeat(currentTarget.length)}
               </div>
             )}
@@ -490,7 +508,7 @@ export default function PracticeEngine({
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck="false"
-              className={`w-full px-5 py-4 bg-slate-950 border-2 rounded-2xl text-slate-100 font-mono-code text-lg sm:text-xl tracking-wider text-center focus:outline-none transition-all ${
+              className={`w-full px-4 sm:px-5 py-3 sm:py-4 bg-slate-950 border-2 rounded-xl sm:rounded-2xl text-slate-100 font-mono-code text-base sm:text-xl tracking-wider text-center focus:outline-none transition-all ${
                 isTimedOut
                   ? 'border-rose-500/60 bg-rose-950/20 cursor-not-allowed'
                   : isSuccessFlash
