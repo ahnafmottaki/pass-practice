@@ -82,3 +82,18 @@ No authentication required. All data is saved locally using SQLite.
 - [x] **Step 7**: Implement Post-Practice Results & Feedback Screen (Accuracy, CPM/WPM, error diff, retry button, history overview).
 - [x] **Step 8**: Implement Practice History & Statistics tab (historical performance, streaks, mastery level).
 - [x] **Step 9**: Testing, validation, responsive polish, and documentation.
+- [x] **Step 10**: Mobile layout refinement (flow-based celebration banner) & Starting Clue (first 2-3 letters) indicator for multiple password drills.
+
+---
+
+## 4. Planned Security Architecture Roadmap
+
+### Zero-Knowledge Master Password + Client-Side AES-256-GCM Encryption
+- **Decision Confirmed**: In a future update, we will implement Zero-Knowledge client-side encryption modeled after modern password managers (Bitwarden / 1Password).
+- **Core Mechanism**:
+  1. User creates a single Master Password or PIN to unlock their vault.
+  2. Web Crypto API (`crypto.subtle`) uses PBKDF2/Argon2 with high iterations (600,000+ rounds) to derive an AES-GCM 256-bit encryption key in browser memory.
+  3. Every password string is encrypted into ciphertext (`iv`, `ciphertext`, `salt`) before being sent to the server or saved to SQLite.
+  4. The SQLite database file on disk stores only scrambled encrypted ciphertext.
+  5. If the database file is ever copied, leaked, or stolen, raw passwords cannot be decrypted without the user's master password.
+  6. Plaintext strings exist exclusively in temporary memory (RAM) while the session is unlocked, allowing full practice diffing and speed analysis.

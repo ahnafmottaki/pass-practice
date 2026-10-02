@@ -88,6 +88,7 @@ export default function App() {
       blindRecall: true,
       showNotes: true,
       shuffleOrder: false,
+      clueLetters: 3,
     });
     startSessionWithConfig({
       modeType: 'time_selected',
@@ -96,6 +97,7 @@ export default function App() {
       blindRecall: true,
       showNotes: true,
       shuffleOrder: false,
+      clueLetters: 3,
     });
     setActiveTab('practice');
   };

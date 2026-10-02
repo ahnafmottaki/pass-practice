@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Timer, Repeat, Eye, EyeOff, HelpCircle, ArrowRight, 
   RotateCcw, XCircle, CheckCircle2, AlertTriangle, Zap,
-  KeyRound, ShieldAlert, Sparkles, Volume2
+  KeyRound, ShieldAlert, Sparkles, Volume2, Lock
 } from 'lucide-react';
 import { calculateMetrics, computeCharDiff } from '../utils/metrics';
 import { playKeyClick, playErrorSound, playSuccessChime, playTimerTick, playTimesUp } from '../utils/audio';
@@ -78,6 +78,16 @@ export default function PracticeEngine({
 
   const currentTask = taskQueue[currentIndex];
   const currentTarget = currentTask?.passwordItem?.password || '';
+
+  const clueLettersSetting = sessionConfig.clueLetters !== undefined ? sessionConfig.clueLetters : 3;
+
+  const cluePrefix = useMemo(() => {
+    if (!currentTarget || clueLettersSetting === 0) return '';
+    const len = currentTarget.length;
+    if (len <= 2) return currentTarget.slice(0, 1);
+    if (len <= 4) return currentTarget.slice(0, Math.min(2, clueLettersSetting));
+    return currentTarget.slice(0, Math.min(clueLettersSetting, len - 1));
+  }, [currentTarget, clueLettersSetting]);
 
   // Focus input on task switch
   useEffect(() => {
@@ -301,16 +311,31 @@ export default function PracticeEngine({
     advanceNextTask(nextResults);
   };
 
+  // Toggle peek with auto-refocus
+  const togglePeeking = () => {
+    setIsPeeking((prev) => {
+      const next = !prev;
+      if (!next) {
+        // Hiding password - immediately refocus input for typing!
+        setTimeout(() => inputRef.current?.focus(), 50);
+      }
+      return next;
+    });
+  };
+
   // Keyboard shortcut listener for Enter / Tab / Esc
   const handleKeyDown = (e) => {
     if (e.key === 'Tab') {
       e.preventDefault();
-      setIsPeeking((p) => !p);
+      togglePeeking();
     } else if (e.key === 'Escape') {
       e.preventDefault();
       onCancelPractice();
     }
   };
+
+  // Typing is locked while password is seen in blind recall mode
+  const isTypingLocked = blindRecall && isPeeking && !isTimedOut;
 
   // Calculate live diff
   const liveDiff = computeCharDiff(typedInput, currentTarget);
@@ -410,18 +435,17 @@ export default function PracticeEngine({
             : 'border-slate-800/80'
         }`}
       >
-        {/* Subtle status feedback badge */}
+        {/* Celebration / Success Feedback Banner (Flow layout - Never overlaps on mobile) */}
         {currentFeedback && (
-          <div className="absolute top-4 right-4 animate-in fade-in slide-in-from-top-2">
-            <span className="px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold font-mono">
-              {currentFeedback}
-            </span>
+          <div className="mb-4 sm:mb-6 p-3 sm:p-3.5 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 text-xs sm:text-sm font-bold font-mono flex items-center justify-center gap-2 animate-in fade-in zoom-in-95 shadow-lg shadow-emerald-500/10 text-center">
+            <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
+            <span>{currentFeedback}</span>
           </div>
         )}
 
         {/* Note / Mnemonic Drawer if present */}
         {currentTask?.passwordItem?.note && showNotes && (
-          <div className="mb-6 p-3 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200/90 flex items-start gap-3">
+          <div className="mb-5 sm:mb-6 p-3 sm:p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200/90 flex items-start gap-3">
             <HelpCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 block">
@@ -435,38 +459,59 @@ export default function PracticeEngine({
         )}
 
         {/* Target Password Prompt / Visualizer */}
-        <div className="text-center space-y-3 mb-8">
-          <div className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-center gap-2">
-            <span>Target String</span>
-            <span className="text-[11px] text-slate-500 font-mono">({currentTarget.length} chars)</span>
+        <div className="text-center space-y-3 mb-6 sm:mb-8">
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Target Password
+            </span>
+            <span className="text-[11px] text-slate-500 font-mono">
+              ({currentTarget.length} chars)
+            </span>
+            {cluePrefix && !isPeeking && blindRecall && !isTimedOut && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-mono flex items-center gap-1">
+                <span>Starts with:</span>
+                <strong className="text-emerald-400 font-bold bg-slate-900 px-1 rounded">{cluePrefix}</strong>
+              </span>
+            )}
           </div>
 
-          {/* Password Display Box */}
-          <div className="inline-flex items-center gap-2 sm:gap-3 px-4 sm:px-6 py-2.5 sm:py-3 rounded-2xl bg-slate-950/90 border border-slate-800/80 shadow-inner max-w-full overflow-x-auto">
-            {isPeeking || !blindRecall || isTimedOut ? (
-              <div className="font-mono-code text-lg sm:text-2xl tracking-widest text-white select-all break-all">
-                {currentTarget}
-              </div>
-            ) : (
-              <div className="font-mono-code text-lg sm:text-2xl tracking-widest text-slate-500 select-none">
-                {'•'.repeat(currentTarget.length)}
-              </div>
-            )}
+          {/* Password Display Box - Constant Fixed Length (Zero Layout Shift) */}
+          <div className="w-full max-w-md mx-auto flex items-center justify-between gap-3 px-4 sm:px-5 py-3 rounded-2xl bg-slate-950/90 border border-slate-800/80 shadow-inner h-14">
+            <div className="flex-1 text-center font-mono-code text-base sm:text-xl tracking-widest overflow-hidden text-ellipsis whitespace-nowrap px-1">
+              {isPeeking || !blindRecall || isTimedOut ? (
+                <span className="text-white select-all">{currentTarget}</span>
+              ) : (
+                <span className="select-none inline-flex items-center justify-center">
+                  {cluePrefix && (
+                    <span className="text-emerald-400 font-bold mr-0.5">{cluePrefix}</span>
+                  )}
+                  <span className="text-slate-500 tracking-widest">
+                    {'•'.repeat(Math.max(0, currentTarget.length - cluePrefix.length))}
+                  </span>
+                </span>
+              )}
+            </div>
 
             {/* Toggle peek button */}
             <button
               type="button"
-              onClick={() => setIsPeeking(!isPeeking)}
-              title="Toggle reveal / peek (Press Tab)"
-              className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+              onClick={togglePeeking}
+              title={isPeeking ? "Hide password (Press Tab)" : "Reveal password (Press Tab)"}
+              className={`p-2 rounded-xl transition-all shrink-0 ${
+                isPeeking
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800'
+              }`}
             >
               {isPeeking ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4 text-brand-400" />}
             </button>
           </div>
 
-          <div className="text-[11px] text-slate-500">
+          <div className="text-[11px] text-slate-500 h-4">
             {blindRecall ? (
-              <span>Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-slate-300">Tab</kbd> to peek password</span>
+              <span>
+                Tip: Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-slate-300">Tab</kbd> to {isPeeking ? 'hide and type' : 'peek password'}
+              </span>
             ) : (
               <span>Visual transcription mode active</span>
             )}
@@ -502,8 +547,14 @@ export default function PracticeEngine({
               value={typedInput}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              disabled={isTimedOut || isSuccessFlash}
-              placeholder={isTimedOut ? "Time's up!" : "Type the exact password here..."}
+              disabled={isTimedOut || isSuccessFlash || isTypingLocked}
+              placeholder={
+                isTimedOut
+                  ? "Time's up!"
+                  : isTypingLocked
+                  ? "Password revealed — hide to type"
+                  : "Type the exact password here..."
+              }
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
@@ -513,6 +564,8 @@ export default function PracticeEngine({
                   ? 'border-rose-500/60 bg-rose-950/20 cursor-not-allowed'
                   : isSuccessFlash
                   ? 'border-emerald-500 bg-emerald-950/30 ring-2 ring-emerald-500'
+                  : isTypingLocked
+                  ? 'border-amber-500/40 bg-amber-950/10 text-amber-300/40 cursor-not-allowed select-none'
                   : 'border-slate-700/80 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20'
               }`}
             />

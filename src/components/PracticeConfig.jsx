@@ -24,6 +24,7 @@ export default function PracticeConfig({
   const [blindRecall, setBlindRecall] = useState(true); // true = masked, false = visible
   const [showNotes, setShowNotes] = useState(true);
   const [shuffleOrder, setShuffleOrder] = useState(false);
+  const [clueLetters, setClueLetters] = useState(3); // 3 letters, 2 letters, or 0 (none)
 
   // Determine current active candidate passwords
   const candidatePasswords = React.useMemo(() => {
@@ -48,6 +49,7 @@ export default function PracticeConfig({
       blindRecall,
       showNotes,
       shuffleOrder,
+      clueLetters,
     });
   };
 
@@ -319,7 +321,7 @@ export default function PracticeConfig({
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               2. Training Preferences
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {/* Blind Recall vs Transcription */}
               <button
                 type="button"
@@ -341,6 +343,36 @@ export default function PracticeConfig({
                   </div>
                   <p className="text-[11px] text-slate-400 mt-0.5">
                     {blindRecall ? 'Hide target password to test pure memory.' : 'Display password to train muscle memory.'}
+                  </p>
+                </div>
+              </button>
+
+              {/* Starting Clue Prefix */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (clueLetters === 3) setClueLetters(2);
+                  else if (clueLetters === 2) setClueLetters(0);
+                  else setClueLetters(3);
+                }}
+                className={`p-3.5 rounded-xl border text-left flex items-start gap-3 transition-colors ${
+                  clueLetters > 0
+                    ? 'border-emerald-500/50 bg-emerald-950/20 text-white'
+                    : 'border-slate-800 bg-slate-900/50 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <Sparkles className={`w-4 h-4 shrink-0 mt-0.5 ${clueLetters > 0 ? 'text-emerald-400' : 'text-slate-500'}`} />
+                <div>
+                  <div className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                    <span>Starting Clue</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-emerald-400 ml-1">
+                      {clueLetters > 0 ? `${clueLetters} letters` : 'Off'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    {clueLetters > 0 
+                      ? `Shows first ${clueLetters} chars so you recognize which password to type.`
+                      : 'No starting letters shown (full blind recall).'}
                   </p>
                 </div>
               </button>
