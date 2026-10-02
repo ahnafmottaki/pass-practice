@@ -1,8 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { KeyRound, Zap, BarChart3, Volume2, VolumeX, ShieldCheck, Database } from 'lucide-react';
 import { isSoundEnabled, setSoundEnabled } from '../utils/audio';
+import { getStorageMode, subscribeStorageMode } from '../api';
 
 export default function Navbar({ activeTab, setActiveTab, passwordCount = 0, soundOn, setSoundOn }) {
+  const [storageMode, setStorageMode] = useState(getStorageMode());
+
+  useEffect(() => {
+    return subscribeStorageMode(setStorageMode);
+  }, []);
+
   const toggleSound = () => {
     const newState = !soundOn;
     setSoundEnabled(newState);
@@ -80,7 +87,7 @@ export default function Navbar({ activeTab, setActiveTab, passwordCount = 0, sou
         <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-1.5 text-xs text-slate-400 px-2.5 py-1 rounded-md bg-slate-900 border border-slate-800">
             <Database className="w-3.5 h-3.5 text-brand-400" />
-            <span>Local SQLite</span>
+            <span>{storageMode}</span>
           </div>
 
           <button

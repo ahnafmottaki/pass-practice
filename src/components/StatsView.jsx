@@ -47,7 +47,7 @@ export default function StatsView({ onGoToPractice }) {
     return (
       <div className="py-20 text-center text-slate-400">
         <div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-        <p className="text-xs">Loading training telemetry from SQLite...</p>
+        <p className="text-xs">Loading training telemetry...</p>
       </div>
     );
   }
