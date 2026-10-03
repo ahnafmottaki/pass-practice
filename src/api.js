@@ -29,6 +29,15 @@ function getHeaders(extraHeaders = {}) {
   return headers;
 }
 
+async function authFetch(url, options = {}) {
+  const headers = getHeaders(options.headers || {});
+  return fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include', // Automatically sends and receives HttpOnly cookies
+  });
+}
+
 async function handleResponse(res) {
   if (!res.ok) {
     let errorMsg = `Server error (${res.status})`;
@@ -62,9 +71,8 @@ export const api = {
   // Authentication
   // ---------------------------------------------
   async register(name, email, password, confirmPassword) {
-    const res = await fetch(`${API_BASE}/auth/register`, {
+    const res = await authFetch(`${API_BASE}/auth/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, email, password, confirmPassword }),
     });
     const data = await handleResponse(res);
@@ -75,9 +83,8 @@ export const api = {
   },
 
   async login(email, password) {
-    const res = await fetch(`${API_BASE}/auth/login`, {
+    const res = await authFetch(`${API_BASE}/auth/login`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     });
     const data = await handleResponse(res);
@@ -88,11 +95,12 @@ export const api = {
   },
 
   async getMe() {
-    if (!authToken) return null;
     try {
-      const res = await fetch(`${API_BASE}/auth/me`, {
-        headers: getHeaders(),
-      });
+      const res = await authFetch(`${API_BASE}/auth/me`);
+      if (res.status === 401) {
+        setAuthToken(null);
+        return null;
+      }
       const data = await handleResponse(res);
       return data.user;
     } catch (err) {
@@ -105,12 +113,9 @@ export const api = {
 
   async logout() {
     try {
-      if (authToken) {
-        await fetch(`${API_BASE}/auth/logout`, {
-          method: 'POST',
-          headers: getHeaders(),
-        });
-      }
+      await authFetch(`${API_BASE}/auth/logout`, {
+        method: 'POST',
+      });
     } catch (e) {
       // ignore
     } finally {
@@ -120,18 +125,16 @@ export const api = {
   },
 
   async setupPin(pin, confirmPin) {
-    const res = await fetch(`${API_BASE}/auth/pin/setup`, {
+    const res = await authFetch(`${API_BASE}/auth/pin/setup`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify({ pin, confirmPin }),
     });
     return handleResponse(res);
   },
 
   async verifyPin(pin) {
-    const res = await fetch(`${API_BASE}/auth/pin/verify`, {
+    const res = await authFetch(`${API_BASE}/auth/pin/verify`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify({ pin }),
     });
     return handleResponse(res);
@@ -141,34 +144,29 @@ export const api = {
   // Passwords
   // ---------------------------------------------
   async getPasswords() {
-    const res = await fetch(`${API_BASE}/passwords`, {
-      headers: getHeaders(),
-    });
+    const res = await authFetch(`${API_BASE}/passwords`);
     return handleResponse(res);
   },
 
   async addPassword(password, note = '', blindIndex = null) {
-    const res = await fetch(`${API_BASE}/passwords`, {
+    const res = await authFetch(`${API_BASE}/passwords`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify({ password, note, blindIndex }),
     });
     return handleResponse(res);
   },
 
   async updatePassword(id, password, note = '', blindIndex = null) {
-    const res = await fetch(`${API_BASE}/passwords/${id}`, {
+    const res = await authFetch(`${API_BASE}/passwords/${id}`, {
       method: 'PUT',
-      headers: getHeaders(),
       body: JSON.stringify({ password, note, blindIndex }),
     });
     return handleResponse(res);
   },
 
   async deletePassword(id) {
-    const res = await fetch(`${API_BASE}/passwords/${id}`, {
+    const res = await authFetch(`${API_BASE}/passwords/${id}`, {
       method: 'DELETE',
-      headers: getHeaders(),
     });
     return handleResponse(res);
   },
@@ -177,43 +175,37 @@ export const api = {
   // Practice Sessions & Logs
   // ---------------------------------------------
   async startSession(mode_type, target_count = 1, total_items = 0) {
-    const res = await fetch(`${API_BASE}/practice/sessions`, {
+    const res = await authFetch(`${API_BASE}/practice/sessions`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify({ mode_type, target_count, total_items }),
     });
     return handleResponse(res);
   },
 
   async recordLog(logData) {
-    const res = await fetch(`${API_BASE}/practice/logs`, {
+    const res = await authFetch(`${API_BASE}/practice/logs`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify(logData),
     });
     return handleResponse(res);
   },
 
   async completeSession(sessionId, summary) {
-    const res = await fetch(`${API_BASE}/practice/sessions/${sessionId}`, {
+    const res = await authFetch(`${API_BASE}/practice/sessions/${sessionId}`, {
       method: 'PUT',
-      headers: getHeaders(),
       body: JSON.stringify(summary),
     });
     return handleResponse(res);
   },
 
   async getStats() {
-    const res = await fetch(`${API_BASE}/practice/stats`, {
-      headers: getHeaders(),
-    });
+    const res = await authFetch(`${API_BASE}/practice/stats`);
     return handleResponse(res);
   },
 
   async clearStats() {
-    const res = await fetch(`${API_BASE}/practice/stats`, {
+    const res = await authFetch(`${API_BASE}/practice/stats`, {
       method: 'DELETE',
-      headers: getHeaders(),
     });
     return handleResponse(res);
   },

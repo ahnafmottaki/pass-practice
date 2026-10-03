@@ -25,6 +25,8 @@ function base64ToBytes(base64) {
 
 /**
  * Derive a 256-bit AES-GCM CryptoKey from the user's 6-digit PIN and user-scoped salt
+ * Uses PBKDF2-HMAC-SHA256 with 600,000 iterations (OWASP recommendation) to prevent
+ * offline GPU brute-force attacks against 6-digit PINs.
  */
 export async function deriveKeyFromPin(pin, salt = 'passpractice_vault') {
   if (!pin || typeof pin !== 'string') {
@@ -32,13 +34,26 @@ export async function deriveKeyFromPin(pin, salt = 'passpractice_vault') {
   }
 
   const enc = new TextEncoder();
-  const inputBuffer = enc.encode(`passpractice_master:${pin}:${salt}`);
-  const rawKeyBuffer = await crypto.subtle.digest('SHA-256', inputBuffer);
+  const pinBuffer = enc.encode(pin);
+  const saltBuffer = enc.encode(`passpractice_master_salt:${salt}`);
 
-  return crypto.subtle.importKey(
+  const baseKey = await crypto.subtle.importKey(
     'raw',
-    rawKeyBuffer,
-    { name: 'AES-GCM' },
+    pinBuffer,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: saltBuffer,
+      iterations: 600000,
+      hash: 'SHA-256',
+    },
+    baseKey,
+    { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt', 'decrypt']
   );
@@ -47,13 +62,34 @@ export async function deriveKeyFromPin(pin, salt = 'passpractice_vault') {
 /**
  * Compute a blind index (deterministic hash) for server-side duplicate prevention
  * without exposing the plaintext password or PIN.
+ * Uses PBKDF2 with 100,000 iterations to resist rainbow table and dictionary attacks.
  */
 export async function computeBlindIndex(pin, plaintext, salt = 'passpractice_vault') {
   if (!plaintext) return '';
   const enc = new TextEncoder();
-  const input = enc.encode(`passpractice_blind:${pin}:${salt}:${plaintext.trim()}`);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', input);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const pinBuffer = enc.encode(pin);
+  const saltBuffer = enc.encode(`passpractice_blind_salt:${salt}:${plaintext.trim()}`);
+
+  const baseKey = await crypto.subtle.importKey(
+    'raw',
+    pinBuffer,
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBuffer,
+      iterations: 100000,
+      hash: 'SHA-256',
+    },
+    baseKey,
+    256
+  );
+
+  const hashArray = Array.from(new Uint8Array(derivedBits));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 

@@ -116,3 +116,22 @@ No authentication required. All data is saved locally using SQLite.
   - [x] Client-side decryption of passwords upon retrieval with the unlocked PIN.
   - [x] PIN verification against stored PIN hash.
   - [x] Lockout rule: track failed PIN attempts; if user enters wrong PIN twice, automatically log out of the account.
+
+---
+
+## 6. Phase 3: Production Security Hardening
+
+- [x] **Task 1: Key Derivation Strengthening (PBKDF2-HMAC-SHA256)**
+  - [x] Upgraded client key derivation in Web Crypto API to PBKDF2 with 600,000 iterations and user salt.
+  - [x] Upgraded duplicate prevention blind indexing to PBKDF2 with 100,000 iterations.
+- [x] **Task 2: Rate Limiting on Authentication & PIN Endpoints**
+  - [x] Configured `express-rate-limit` on `/api/auth/register` and `/api/auth/login` (max 20 attempts per 15 min per IP).
+  - [x] Configured rate limiting on `/api/auth/pin/*` (max 15 attempts per 15 min per IP).
+- [x] **Task 3: Security Headers & CORS Lockdown**
+  - [x] Integrated `helmet` with custom Content Security Policy (CSP).
+  - [x] Restricted CORS to domain origin and verified local hosts with `credentials: true`.
+- [x] **Task 4: HttpOnly Cookies with SameSite=Strict**
+  - [x] Session tokens delivered via `Set-Cookie` with `HttpOnly`, `SameSite=Strict`, and environment-adaptive `secure` flag.
+  - [x] Seamless dual-fallback for cookie and `Authorization: Bearer` headers.
+  - [x] Client `api.js` configured with `credentials: 'include'` for all requests.
+

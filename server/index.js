@@ -1,5 +1,8 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -12,19 +15,125 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-app.use(cors());
+// Trust reverse proxy (e.g. Vercel, Caddy, Nginx) for protocol and client IP detection
+app.set('trust proxy', 1);
+
+// -------------------------------------------------------------
+// Security Headers & CORS Lockdown
+// -------------------------------------------------------------
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'", 'data:'],
+      objectSrc: ["'none'"],
+      upgradeInsecureRequests: null,
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
+
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || process.env.CLIENT_URL;
+const allowedOrigins = [
+  ALLOWED_ORIGIN,
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:3001',
+].filter(Boolean);
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin) || (ALLOWED_ORIGIN && origin === ALLOWED_ORIGIN)) {
+      callback(null, true);
+    } else {
+      callback(new Error(`Origin ${origin} not allowed by CORS policy.`));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
+app.use(cookieParser());
 app.use(express.json());
+
+// -------------------------------------------------------------
+// Rate Limiters
+// -------------------------------------------------------------
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts from this IP. Please try again after 15 minutes.' },
+});
+
+const pinLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many PIN verification attempts from this IP. Please try again later.' },
+});
+
+// -------------------------------------------------------------
+// HttpOnly Cookie Helpers
+// -------------------------------------------------------------
+const COOKIE_NAME = 'passpractice_session';
+
+function setSessionCookie(req, res, token) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: isProd && isHttps,
+    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+    path: '/',
+  });
+}
+
+function clearSessionCookie(req, res) {
+  const isProd = process.env.NODE_ENV === 'production';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: isProd && isHttps,
+    path: '/',
+  });
+}
 
 // -------------------------------------------------------------
 // Authentication Middleware
 // -------------------------------------------------------------
 function authenticate(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  let token = null;
+
+  // 1. Check HttpOnly cookie first
+  if (req.cookies && req.cookies[COOKIE_NAME]) {
+    token = req.cookies[COOKIE_NAME];
+  }
+
+  // 2. Check Authorization Bearer header fallback
+  if (!token) {
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    }
+  }
+
+  if (!token) {
     return res.status(401).json({ error: 'Authentication required. Please sign in.' });
   }
 
-  const token = authHeader.slice(7).trim();
   const now = new Date().toISOString();
 
   const session = db.prepare(`
@@ -35,6 +144,7 @@ function authenticate(req, res, next) {
   `).get(token, now);
 
   if (!session) {
+    clearSessionCookie(req, res);
     return res.status(401).json({ error: 'Session expired or invalid. Please sign in again.' });
   }
 
@@ -54,7 +164,7 @@ function authenticate(req, res, next) {
 // -------------------------------------------------------------
 
 // 1. Register: Name, Email, Password, Confirm Password
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', authLimiter, (req, res) => {
   try {
     const { name, email, password, confirmPassword } = req.body;
 
@@ -99,6 +209,9 @@ app.post('/api/auth/register', (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(token, userId, now, expiresAt);
 
+    // Set HttpOnly, SameSite=Strict cookie
+    setSessionCookie(req, res, token);
+
     res.status(201).json({
       token,
       user: {
@@ -115,7 +228,7 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 // 2. Login: Email and Password
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', authLimiter, (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -143,6 +256,9 @@ app.post('/api/auth/login', (req, res) => {
       VALUES (?, ?, ?, ?)
     `).run(token, user.id, now, expiresAt);
 
+    // Set HttpOnly, SameSite=Strict cookie
+    setSessionCookie(req, res, token);
+
     res.json({
       token,
       user: {
@@ -169,15 +285,20 @@ const failedPinAttempts = new Map();
 // 4. Logout: /api/auth/logout
 app.post('/api/auth/logout', (req, res) => {
   try {
+    let token = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers['authorization'];
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.slice(7).trim();
+    if (!token && authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.slice(7).trim();
+    }
+
+    if (token) {
       const session = db.prepare('SELECT user_id FROM sessions WHERE token = ?').get(token);
       if (session) {
         failedPinAttempts.delete(session.user_id);
       }
       db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
     }
+    clearSessionCookie(req, res);
     res.json({ success: true, message: 'Logged out successfully.' });
   } catch (error) {
     console.error('Logout error:', error);
@@ -186,7 +307,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // 4a. Setup 6-Digit Encryption PIN
-app.post('/api/auth/pin/setup', authenticate, (req, res) => {
+app.post('/api/auth/pin/setup', pinLimiter, authenticate, (req, res) => {
   try {
     const { pin, confirmPin } = req.body;
     const pinRegex = /^\d{6}$/;
@@ -222,7 +343,7 @@ app.post('/api/auth/pin/setup', authenticate, (req, res) => {
 });
 
 // 4b. Verify 6-Digit Encryption PIN (2-attempt lockout rule)
-app.post('/api/auth/pin/verify', authenticate, (req, res) => {
+app.post('/api/auth/pin/verify', pinLimiter, authenticate, (req, res) => {
   try {
     const { pin } = req.body;
     const pinRegex = /^\d{6}$/;
@@ -243,9 +364,10 @@ app.post('/api/auth/pin/verify', authenticate, (req, res) => {
       failedPinAttempts.set(req.userId, attempts);
 
       if (attempts >= 2) {
-        // Exceeded 2 attempts: revoke all sessions for this user immediately
+        // Exceeded 2 attempts: revoke all sessions for this user immediately and clear cookie
         db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.userId);
         failedPinAttempts.delete(req.userId);
+        clearSessionCookie(req, res);
         return res.status(401).json({
           error: 'Incorrect PIN. You entered the wrong PIN twice and have been logged out for security.',
           lockedOut: true,
