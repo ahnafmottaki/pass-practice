@@ -86,14 +86,33 @@ No authentication required. All data is saved locally using SQLite.
 
 ---
 
-## 4. Planned Security Architecture Roadmap
+---
+
+## 4. Security Architecture & Roadmap
 
 ### Zero-Knowledge Master Password + Client-Side AES-256-GCM Encryption
-- **Decision Confirmed**: In a future update, we will implement Zero-Knowledge client-side encryption modeled after modern password managers (Bitwarden / 1Password).
-- **Core Mechanism**:
-  1. User creates a single Master Password or PIN to unlock their vault.
-  2. Web Crypto API (`crypto.subtle`) uses PBKDF2/Argon2 with high iterations (600,000+ rounds) to derive an AES-GCM 256-bit encryption key in browser memory.
-  3. Every password string is encrypted into ciphertext (`iv`, `ciphertext`, `salt`) before being sent to the server or saved to SQLite.
-  4. The SQLite database file on disk stores only scrambled encrypted ciphertext.
-  5. If the database file is ever copied, leaked, or stolen, raw passwords cannot be decrypted without the user's master password.
-  6. Plaintext strings exist exclusively in temporary memory (RAM) while the session is unlocked, allowing full practice diffing and speed analysis.
+- **Decision Confirmed**: Zero-Knowledge client-side encryption with a 6-digit PIN and user authentication.
+
+---
+
+## 5. Phase 2: User Authentication & Zero-Knowledge PIN Implementation Tasks
+
+- [x] **Task 1: User Authentication & Registration**
+  - [x] Registration with Name, Email, Password, Confirm Password.
+  - [x] Password validation and secure hashing with salt (`scrypt`) in SQLite `users` table.
+  - [x] Login authentication with email and password verification.
+  - [x] Auth sessions/tokens management and persistent user state in React frontend.
+  - [x] User logout and session protection for APIs and vault.
+  - [x] Associate passwords, practice sessions, and logs with `user_id`.
+
+- [x] **Task 2: 6-Digit Encryption PIN Setup & Unlock Prompt**
+  - [x] After successful login, detect if user has configured an encryption PIN.
+  - [x] Prompt new users to set up a 6-digit encryption PIN with confirmation.
+  - [x] Whenever user logs in, prompt them to enter their 6-digit PIN before they can access their passwords.
+
+- [x] **Task 3: Zero-Knowledge Encryption, Decryption & Security Lockout**
+  - [x] Hash 6-digit PIN and use it as the AES-256 encryption key.
+  - [x] Client-side encryption of passwords before sending/storing in SQLite.
+  - [x] Client-side decryption of passwords upon retrieval with the unlocked PIN.
+  - [x] PIN verification against stored PIN hash.
+  - [x] Lockout rule: track failed PIN attempts; if user enters wrong PIN twice, automatically log out of the account.

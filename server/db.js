@@ -12,18 +12,40 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
 
-// Initialize database schema
+// 1. Initialize core tables
 db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    pin_hash TEXT DEFAULT NULL,
+    pin_salt TEXT DEFAULT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS passwords (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    password TEXT NOT NULL UNIQUE,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    password TEXT NOT NULL,
     note TEXT DEFAULT '',
+    blind_index TEXT DEFAULT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 
   CREATE TABLE IF NOT EXISTS practice_sessions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     mode_type TEXT NOT NULL,
     target_count INTEGER DEFAULT 1,
     started_at TEXT NOT NULL,
@@ -51,8 +73,37 @@ db.exec(`
     FOREIGN KEY(session_id) REFERENCES practice_sessions(id) ON DELETE CASCADE,
     FOREIGN KEY(password_id) REFERENCES passwords(id) ON DELETE SET NULL
   );
+`);
 
-  CREATE INDEX IF NOT EXISTS idx_passwords_created ON passwords(created_at DESC);
+// 2. Migration helpers: Ensure columns exist if table was created in an older version
+try {
+  const pwdCols = db.prepare("PRAGMA table_info('passwords')").all();
+  if (!pwdCols.some((c) => c.name === 'user_id')) {
+    db.exec('ALTER TABLE passwords ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;');
+  }
+  if (!pwdCols.some((c) => c.name === 'blind_index')) {
+    db.exec('ALTER TABLE passwords ADD COLUMN blind_index TEXT DEFAULT NULL;');
+  }
+} catch (e) {
+  // ignore
+}
+
+try {
+  const sessCols = db.prepare("PRAGMA table_info('practice_sessions')").all();
+  if (!sessCols.some((c) => c.name === 'user_id')) {
+    db.exec('ALTER TABLE practice_sessions ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;');
+  }
+} catch (e) {
+  // ignore
+}
+
+// 3. Create indexes safely
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
+  CREATE INDEX IF NOT EXISTS idx_passwords_user ON passwords(user_id);
+  CREATE INDEX IF NOT EXISTS idx_passwords_blind_index ON passwords(user_id, blind_index);
+  CREATE INDEX IF NOT EXISTS idx_practice_sessions_user ON practice_sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_logs_session ON practice_logs(session_id);
 `);
 

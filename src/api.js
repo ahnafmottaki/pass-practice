@@ -1,191 +1,221 @@
-import { localStore } from './utils/localStore';
-
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+const TOKEN_KEY = 'passpractice_auth_token';
 
-// Check if we are running in an environment without a local server (e.g. Vercel, Netlify, GitHub Pages)
-const isBrowser = typeof window !== 'undefined';
-const isLocalHost = isBrowser && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-const hasExplicitApiUrl = Boolean(import.meta.env.VITE_API_URL);
+let authToken = typeof window !== 'undefined' ? localStorage.getItem(TOKEN_KEY) : null;
 
-// If on a static cloud host and no external backend is specified, default to browser storage
-let activeMode = (!isLocalHost && !hasExplicitApiUrl) ? 'local' : 'server';
-
-const modeListeners = new Set();
-export function subscribeStorageMode(listener) {
-  modeListeners.add(listener);
-  listener(getStorageMode());
-  return () => modeListeners.delete(listener);
+export function getAuthToken() {
+  return authToken;
 }
 
-function setMode(newMode) {
-  if (activeMode !== newMode) {
-    activeMode = newMode;
-    const modeName = getStorageMode();
-    modeListeners.forEach((fn) => fn(modeName));
+export function setAuthToken(token) {
+  authToken = token;
+  if (typeof window !== 'undefined') {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
   }
 }
 
-export function getStorageMode() {
-  return activeMode === 'local' ? 'Browser Storage' : 'Local SQLite';
+function getHeaders(extraHeaders = {}) {
+  const headers = {
+    'Content-Type': 'application/json',
+    ...extraHeaders,
+  };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  return headers;
 }
 
 async function handleResponse(res) {
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    // If the server returns HTML (like Vercel rewriting to index.html), signal fallback
-    throw new Error('NON_JSON_RESPONSE');
-  }
-
   if (!res.ok) {
     let errorMsg = `Server error (${res.status})`;
+    let errData = {};
     try {
-      const data = await res.json();
-      if (data && data.error) {
-        errorMsg = data.error;
+      errData = await res.json();
+      if (errData && errData.error) {
+        errorMsg = errData.error;
       }
     } catch (e) {
-      // ignore
+      // ignore parse error
     }
     const err = new Error(errorMsg);
     err.status = res.status;
+    err.data = errData;
+    err.lockedOut = !!errData.lockedOut;
+    err.attemptsRemaining = errData.attemptsRemaining;
+    if (res.status === 401) {
+      // Don't clear token if it's attempt 1 of PIN verification
+      if (errData.lockedOut !== false) {
+        setAuthToken(null);
+      }
+    }
     throw err;
   }
   return res.json();
 }
 
-async function executeWithFallback(serverAction, localAction) {
-  if (activeMode === 'local') {
-    return localAction();
-  }
-
-  try {
-    return await serverAction();
-  } catch (err) {
-    // If backend is not running, or server returned HTML (Vercel rewrite fallback), switch to localStore
-    if (err.message === 'NON_JSON_RESPONSE' || err.name === 'TypeError' || err.message?.includes('Failed to fetch')) {
-      console.warn('Backend server not reachable or returned HTML. Switching to browser storage.', err.message);
-      setMode('local');
-      return localAction();
-    }
-    throw err;
-  }
-}
-
 export const api = {
-  // Passwords
-  async getPasswords() {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/passwords`);
-        return handleResponse(res);
-      },
-      () => localStore.getPasswords()
-    );
+  // ---------------------------------------------
+  // Authentication
+  // ---------------------------------------------
+  async register(name, email, password, confirmPassword) {
+    const res = await fetch(`${API_BASE}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password, confirmPassword }),
+    });
+    const data = await handleResponse(res);
+    if (data.token) {
+      setAuthToken(data.token);
+    }
+    return data;
   },
 
-  async addPassword(password, note = '') {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/passwords`, {
+  async login(email, password) {
+    const res = await fetch(`${API_BASE}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const data = await handleResponse(res);
+    if (data.token) {
+      setAuthToken(data.token);
+    }
+    return data;
+  },
+
+  async getMe() {
+    if (!authToken) return null;
+    try {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        headers: getHeaders(),
+      });
+      const data = await handleResponse(res);
+      return data.user;
+    } catch (err) {
+      if (err.status === 401) {
+        setAuthToken(null);
+      }
+      return null;
+    }
+  },
+
+  async logout() {
+    try {
+      if (authToken) {
+        await fetch(`${API_BASE}/auth/logout`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, note }),
+          headers: getHeaders(),
         });
-        return handleResponse(res);
-      },
-      () => localStore.addPassword(password, note)
-    );
+      }
+    } catch (e) {
+      // ignore
+    } finally {
+      setAuthToken(null);
+    }
+    return { success: true };
   },
 
-  async updatePassword(id, password, note = '') {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/passwords/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ password, note }),
-        });
-        return handleResponse(res);
-      },
-      () => localStore.updatePassword(id, password, note)
-    );
+  async setupPin(pin, confirmPin) {
+    const res = await fetch(`${API_BASE}/auth/pin/setup`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ pin, confirmPin }),
+    });
+    return handleResponse(res);
+  },
+
+  async verifyPin(pin) {
+    const res = await fetch(`${API_BASE}/auth/pin/verify`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ pin }),
+    });
+    return handleResponse(res);
+  },
+
+  // ---------------------------------------------
+  // Passwords
+  // ---------------------------------------------
+  async getPasswords() {
+    const res = await fetch(`${API_BASE}/passwords`, {
+      headers: getHeaders(),
+    });
+    return handleResponse(res);
+  },
+
+  async addPassword(password, note = '', blindIndex = null) {
+    const res = await fetch(`${API_BASE}/passwords`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ password, note, blindIndex }),
+    });
+    return handleResponse(res);
+  },
+
+  async updatePassword(id, password, note = '', blindIndex = null) {
+    const res = await fetch(`${API_BASE}/passwords/${id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ password, note, blindIndex }),
+    });
+    return handleResponse(res);
   },
 
   async deletePassword(id) {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/passwords/${id}`, {
-          method: 'DELETE',
-        });
-        return handleResponse(res);
-      },
-      () => localStore.deletePassword(id)
-    );
+    const res = await fetch(`${API_BASE}/passwords/${id}`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    return handleResponse(res);
   },
 
+  // ---------------------------------------------
   // Practice Sessions & Logs
+  // ---------------------------------------------
   async startSession(mode_type, target_count = 1, total_items = 0) {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/practice/sessions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode_type, target_count, total_items }),
-        });
-        return handleResponse(res);
-      },
-      () => localStore.startSession(mode_type, target_count, total_items)
-    );
+    const res = await fetch(`${API_BASE}/practice/sessions`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ mode_type, target_count, total_items }),
+    });
+    return handleResponse(res);
   },
 
   async recordLog(logData) {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/practice/logs`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(logData),
-        });
-        return handleResponse(res);
-      },
-      () => localStore.recordLog(logData)
-    );
+    const res = await fetch(`${API_BASE}/practice/logs`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify(logData),
+    });
+    return handleResponse(res);
   },
 
   async completeSession(sessionId, summary) {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/practice/sessions/${sessionId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(summary),
-        });
-        return handleResponse(res);
-      },
-      () => localStore.completeSession(sessionId, summary)
-    );
+    const res = await fetch(`${API_BASE}/practice/sessions/${sessionId}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify(summary),
+    });
+    return handleResponse(res);
   },
 
   async getStats() {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/practice/stats`);
-        return handleResponse(res);
-      },
-      () => localStore.getStats()
-    );
+    const res = await fetch(`${API_BASE}/practice/stats`, {
+      headers: getHeaders(),
+    });
+    return handleResponse(res);
   },
 
   async clearStats() {
-    return executeWithFallback(
-      async () => {
-        const res = await fetch(`${API_BASE}/practice/stats`, {
-          method: 'DELETE',
-        });
-        return handleResponse(res);
-      },
-      () => localStore.clearStats()
-    );
+    const res = await fetch(`${API_BASE}/practice/stats`, {
+      method: 'DELETE',
+      headers: getHeaders(),
+    });
+    return handleResponse(res);
   },
 };
 
