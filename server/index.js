@@ -720,16 +720,20 @@ app.delete('/api/practice/stats', authenticate, (req, res) => {
 });
 
 // -------------------------------------------------------------
-// Serve Static Frontend Assets
+// Serve Static Frontend Assets (When running standalone, not in Vercel)
 // -------------------------------------------------------------
-const distPath = path.resolve(__dirname, '..', 'dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.resolve(distPath, 'index.html'));
+if (!process.env.VERCEL) {
+  const distPath = path.resolve(__dirname, '..', 'dist');
+  if (fs.existsSync(distPath)) {
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server listening on port ${PORT}`);
   });
 }
 
-app.listen(PORT, () => {
-  console.log(`Server listening on port ${PORT}`);
-});
+export default app;

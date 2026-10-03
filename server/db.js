@@ -1,10 +1,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const DB_PATH = path.resolve(__dirname, '..', 'passwords.db');
+
+const isVercel = !!process.env.VERCEL;
+const DB_PATH = isVercel
+  ? path.join(os.tmpdir(), 'passwords.db')
+  : path.resolve(__dirname, '..', 'passwords.db');
 
 export const db = new DatabaseSync(DB_PATH);
 

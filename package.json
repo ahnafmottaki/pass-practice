@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Minimalist Password Practice Web Application with SQLite",
   "type": "module",
+  "engines": {
+    "node": ">=22.x"
+  },
   "scripts": {
     "dev:server": "node server/index.js",
     "dev:client": "vite",
