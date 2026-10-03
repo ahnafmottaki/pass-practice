@@ -38,22 +38,45 @@ app.use(helmet({
 }));
 
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || process.env.CLIENT_URL;
-const allowedOrigins = [
-  ALLOWED_ORIGIN,
-  'http://localhost:5173',
-  'http://localhost:3000',
-  'http://localhost:3001',
-  'http://127.0.0.1:5173',
-  'http://127.0.0.1:3001',
-].filter(Boolean);
+
+function isOriginAllowed(origin) {
+  if (!origin) return true; // Same-origin, direct API calls, or tools
+
+  // Configured origin from env
+  if (ALLOWED_ORIGIN && (origin === ALLOWED_ORIGIN || ALLOWED_ORIGIN === '*')) {
+    return true;
+  }
+
+  // Allow Vercel deployment domains (both production and preview deployments)
+  try {
+    const url = new URL(origin);
+    if (url.hostname.endsWith('.vercel.app')) {
+      return true;
+    }
+    if (process.env.VERCEL_URL && url.hostname === process.env.VERCEL_URL) {
+      return true;
+    }
+  } catch (e) {
+    // ignore parse error
+  }
+
+  // Allow localhost & local IP during development
+  if (
+    origin.startsWith('http://localhost:') ||
+    origin.startsWith('http://127.0.0.1:')
+  ) {
+    return true;
+  }
+
+  return false;
+}
 
 app.use(cors({
   origin: function (origin, callback) {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin) || (ALLOWED_ORIGIN && origin === ALLOWED_ORIGIN)) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin ${origin} not allowed by CORS policy.`));
+      callback(null, false);
     }
   },
   credentials: true,
