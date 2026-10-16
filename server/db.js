@@ -1,115 +1,126 @@
-import { DatabaseSync } from 'node:sqlite';
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const isVercel = !!process.env.VERCEL;
-const DB_PATH = isVercel
-  ? path.join(os.tmpdir(), 'passwords.db')
-  : path.resolve(__dirname, '..', 'passwords.db');
+// Ensure .env is loaded from project root
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-export const db = new DatabaseSync(DB_PATH);
-
-// Enable WAL mode and foreign keys for durability and performance
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
-
-// 1. Initialize core tables
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    password_hash TEXT NOT NULL,
-    salt TEXT NOT NULL,
-    pin_hash TEXT DEFAULT NULL,
-    pin_salt TEXT DEFAULT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS passwords (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    password TEXT NOT NULL,
-    note TEXT DEFAULT '',
-    blind_index TEXT DEFAULT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS practice_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    mode_type TEXT NOT NULL,
-    target_count INTEGER DEFAULT 1,
-    started_at TEXT NOT NULL,
-    completed_at TEXT,
-    total_items INTEGER DEFAULT 0,
-    successful_items INTEGER DEFAULT 0,
-    avg_accuracy REAL DEFAULT 0,
-    avg_speed_cpm REAL DEFAULT 0
-  );
-
-  CREATE TABLE IF NOT EXISTS practice_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER,
-    password_id INTEGER,
-    is_success INTEGER NOT NULL,
-    duration_ms INTEGER NOT NULL,
-    accuracy REAL NOT NULL,
-    typed_length INTEGER NOT NULL,
-    target_length INTEGER NOT NULL,
-    speed_cpm REAL NOT NULL,
-    speed_wpm REAL NOT NULL,
-    error_count INTEGER NOT NULL,
-    timed_out INTEGER DEFAULT 0,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(session_id) REFERENCES practice_sessions(id) ON DELETE CASCADE,
-    FOREIGN KEY(password_id) REFERENCES passwords(id) ON DELETE SET NULL
-  );
-`);
-
-// 2. Migration helpers: Ensure columns exist if table was created in an older version
-try {
-  const pwdCols = db.prepare("PRAGMA table_info('passwords')").all();
-  if (!pwdCols.some((c) => c.name === 'user_id')) {
-    db.exec('ALTER TABLE passwords ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;');
-  }
-  if (!pwdCols.some((c) => c.name === 'blind_index')) {
-    db.exec('ALTER TABLE passwords ADD COLUMN blind_index TEXT DEFAULT NULL;');
-  }
-} catch (e) {
-  // ignore
+// Global cached connection for serverless / Vercel container reuse
+let cached = global._mongooseCached;
+if (!cached) {
+  cached = global._mongooseCached = { conn: null, promise: null };
 }
 
-try {
-  const sessCols = db.prepare("PRAGMA table_info('practice_sessions')").all();
-  if (!sessCols.some((c) => c.name === 'user_id')) {
-    db.exec('ALTER TABLE practice_sessions ADD COLUMN user_id INTEGER REFERENCES users(id) ON DELETE CASCADE;');
+export async function connectDB() {
+  const uri = process.env.DATABASE_URL || process.env.MONGODB_URI;
+
+  if (!uri || !uri.trim()) {
+    throw new Error('DATABASE_URL is not set. Please add your MongoDB Atlas connection string to .env or Vercel environment variables.');
   }
-} catch (e) {
-  // ignore
+
+  if (cached.conn && mongoose.connection.readyState === 1) {
+    return cached.conn;
+  }
+
+  if (!cached.promise) {
+    const opts = {
+      bufferCommands: false,
+      maxPoolSize: 10,
+      serverSelectionTimeoutMS: 8000,
+    };
+
+    cached.promise = mongoose.connect(uri.trim(), opts).then((m) => {
+      console.log('[MongoDB Atlas] Connected successfully');
+      return m;
+    });
+  }
+
+  try {
+    cached.conn = await cached.promise;
+  } catch (err) {
+    cached.promise = null;
+    throw err;
+  }
+
+  return cached.conn;
 }
 
-// 3. Create indexes safely
-db.exec(`
-  CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-  CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
-  CREATE INDEX IF NOT EXISTS idx_passwords_user ON passwords(user_id);
-  CREATE INDEX IF NOT EXISTS idx_passwords_blind_index ON passwords(user_id, blind_index);
-  CREATE INDEX IF NOT EXISTS idx_practice_sessions_user ON practice_sessions(user_id);
-  CREATE INDEX IF NOT EXISTS idx_logs_session ON practice_logs(session_id);
-`);
+// -------------------------------------------------------------
+// Schemas & Models
+// -------------------------------------------------------------
 
-export default db;
+const UserSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true },
+  email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+  password_hash: { type: String, required: true },
+  salt: { type: String, required: true },
+  pin_hash: { type: String, default: null },
+  pin_salt: { type: String, default: null },
+  created_at: { type: String, default: () => new Date().toISOString() },
+  updated_at: { type: String, default: () => new Date().toISOString() },
+});
+
+const SessionSchema = new mongoose.Schema({
+  token: { type: String, required: true, unique: true, index: true },
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  created_at: { type: String, default: () => new Date().toISOString() },
+  expires_at: { type: String, required: true },
+});
+
+const PasswordSchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  password: { type: String, required: true },
+  note: { type: String, default: '' },
+  blind_index: { type: String, default: null },
+  created_at: { type: String, default: () => new Date().toISOString() },
+  updated_at: { type: String, default: () => new Date().toISOString() },
+});
+
+PasswordSchema.index({ user_id: 1, blind_index: 1 });
+PasswordSchema.index({ user_id: 1, password: 1 });
+
+const PracticeSessionSchema = new mongoose.Schema({
+  user_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  mode_type: { type: String, required: true },
+  target_count: { type: Number, default: 1 },
+  started_at: { type: String, default: () => new Date().toISOString() },
+  completed_at: { type: String, default: null },
+  total_items: { type: Number, default: 0 },
+  successful_items: { type: Number, default: 0 },
+  avg_accuracy: { type: Number, default: 0 },
+  avg_speed_cpm: { type: Number, default: 0 },
+});
+
+const PracticeLogSchema = new mongoose.Schema({
+  session_id: { type: mongoose.Schema.Types.ObjectId, ref: 'PracticeSession', default: null, index: true },
+  password_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Password', default: null, index: true },
+  is_success: { type: Number, required: true, default: 0 },
+  duration_ms: { type: Number, default: 0 },
+  accuracy: { type: Number, default: 0 },
+  typed_length: { type: Number, default: 0 },
+  target_length: { type: Number, default: 0 },
+  speed_cpm: { type: Number, default: 0 },
+  speed_wpm: { type: Number, default: 0 },
+  error_count: { type: Number, default: 0 },
+  timed_out: { type: Number, default: 0 },
+  created_at: { type: String, default: () => new Date().toISOString() },
+});
+
+export const User = mongoose.models.User || mongoose.model('User', UserSchema);
+export const Session = mongoose.models.Session || mongoose.model('Session', SessionSchema);
+export const Password = mongoose.models.Password || mongoose.model('Password', PasswordSchema);
+export const PracticeSession = mongoose.models.PracticeSession || mongoose.model('PracticeSession', PracticeSessionSchema);
+export const PracticeLog = mongoose.models.PracticeLog || mongoose.model('PracticeLog', PracticeLogSchema);
+
+export default {
+  connectDB,
+  User,
+  Session,
+  Password,
+  PracticeSession,
+  PracticeLog,
+};

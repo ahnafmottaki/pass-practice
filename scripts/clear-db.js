@@ -1,35 +1,37 @@
-import db from '../server/db.js';
+import { connectDB, User, Session, Password, PracticeSession, PracticeLog } from '../server/db.js';
 
-console.log('Clearing SQLite database...');
+async function clearDB() {
+  console.log('Connecting to MongoDB Atlas...');
+  await connectDB();
 
-db.exec('PRAGMA foreign_keys = OFF;');
+  console.log('Clearing MongoDB database collections...');
+  await Promise.all([
+    PracticeLog.deleteMany({}),
+    PracticeSession.deleteMany({}),
+    Password.deleteMany({}),
+    Session.deleteMany({}),
+    User.deleteMany({}),
+  ]);
 
-db.exec(`
-  DELETE FROM practice_logs;
-  DELETE FROM practice_sessions;
-  DELETE FROM passwords;
-  DELETE FROM sessions;
-  DELETE FROM users;
-`);
+  const [userCount, sessionCount, passwordCount, practiceCount] = await Promise.all([
+    User.countDocuments(),
+    Session.countDocuments(),
+    Password.countDocuments(),
+    PracticeSession.countDocuments(),
+  ]);
 
-try {
-  db.exec("DELETE FROM sqlite_sequence WHERE name IN ('users', 'sessions', 'passwords', 'practice_sessions', 'practice_logs');");
-} catch (e) {
-  // sqlite_sequence might be empty or not yet created
-}
-
-db.exec('PRAGMA foreign_keys = ON;');
-db.exec('VACUUM;');
-
-const userCount = db.prepare('SELECT COUNT(*) as count FROM users').get().count;
-const sessionCount = db.prepare('SELECT COUNT(*) as count FROM sessions').get().count;
-const passwordCount = db.prepare('SELECT COUNT(*) as count FROM passwords').get().count;
-const practiceCount = db.prepare('SELECT COUNT(*) as count FROM practice_sessions').get().count;
-
-console.log('Database cleared successfully!');
-console.log(`Current counts:
+  console.log('Database cleared successfully!');
+  console.log(`Current counts:
 - users: ${userCount}
 - sessions: ${sessionCount}
 - passwords: ${passwordCount}
 - practice_sessions: ${practiceCount}
 `);
+
+  process.exit(0);
+}
+
+clearDB().catch((err) => {
+  console.error('Failed to clear database:', err);
+  process.exit(1);
+});

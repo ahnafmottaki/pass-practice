@@ -77,6 +77,7 @@ async function testVercelServerless() {
     console.log('✅ ALL VERCEL CORS AND SERVERLESS TESTS PASSED PERFECTLY!');
   } finally {
     server.close();
+    process.exit(0);
   }
 }
 

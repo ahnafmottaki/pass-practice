@@ -3,10 +3,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import cookieParser from 'cookie-parser';
+import mongoose from 'mongoose';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import db from './db.js';
+import { connectDB, User, Session, Password, PracticeSession, PracticeLog } from './db.js';
 import { hashPassword, verifyPassword, generateToken } from './auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -88,6 +89,26 @@ app.use(cookieParser());
 app.use(express.json());
 
 // -------------------------------------------------------------
+// Database Connection Verification Middleware
+// -------------------------------------------------------------
+app.use(async (req, res, next) => {
+  // Only enforce database connection for API routes
+  if (req.path.startsWith('/api')) {
+    try {
+      await connectDB();
+      next();
+    } catch (err) {
+      return res.status(503).json({
+        error: 'Database connection failed. Please ensure DATABASE_URL in your .env file or Vercel environment is valid.',
+        details: err.message,
+      });
+    }
+  } else {
+    next();
+  }
+});
+
+// -------------------------------------------------------------
 // Rate Limiters
 // -------------------------------------------------------------
 const authLimiter = rateLimit({
@@ -137,49 +158,52 @@ function clearSessionCookie(req, res) {
 // -------------------------------------------------------------
 // Authentication Middleware
 // -------------------------------------------------------------
-function authenticate(req, res, next) {
-  let token = null;
+async function authenticate(req, res, next) {
+  try {
+    let token = null;
 
-  // 1. Check HttpOnly cookie first
-  if (req.cookies && req.cookies[COOKIE_NAME]) {
-    token = req.cookies[COOKIE_NAME];
-  }
-
-  // 2. Check Authorization Bearer header fallback
-  if (!token) {
-    const authHeader = req.headers['authorization'];
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      token = authHeader.slice(7).trim();
+    // 1. Check HttpOnly cookie first
+    if (req.cookies && req.cookies[COOKIE_NAME]) {
+      token = req.cookies[COOKIE_NAME];
     }
+
+    // 2. Check Authorization Bearer header fallback
+    if (!token) {
+      const authHeader = req.headers['authorization'];
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.slice(7).trim();
+      }
+    }
+
+    if (!token) {
+      return res.status(401).json({ error: 'Authentication required. Please sign in.' });
+    }
+
+    const now = new Date().toISOString();
+    const session = await Session.findOne({
+      token,
+      expires_at: { $gt: now },
+    }).populate('user_id');
+
+    if (!session || !session.user_id) {
+      clearSessionCookie(req, res);
+      return res.status(401).json({ error: 'Session expired or invalid. Please sign in again.' });
+    }
+
+    const user = session.user_id;
+    req.user = {
+      id: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      hasPin: !!user.pin_hash,
+    };
+    req.userId = user._id.toString();
+    req.token = token;
+    next();
+  } catch (error) {
+    console.error('Authentication middleware error:', error);
+    res.status(500).json({ error: 'Authentication verification failed.' });
   }
-
-  if (!token) {
-    return res.status(401).json({ error: 'Authentication required. Please sign in.' });
-  }
-
-  const now = new Date().toISOString();
-
-  const session = db.prepare(`
-    SELECT s.token, s.user_id, u.name, u.email, u.pin_hash
-    FROM sessions s
-    JOIN users u ON s.user_id = u.id
-    WHERE s.token = ? AND s.expires_at > ?
-  `).get(token, now);
-
-  if (!session) {
-    clearSessionCookie(req, res);
-    return res.status(401).json({ error: 'Session expired or invalid. Please sign in again.' });
-  }
-
-  req.user = {
-    id: session.user_id,
-    name: session.name,
-    email: session.email,
-    hasPin: !!session.pin_hash,
-  };
-  req.userId = session.user_id;
-  req.token = token;
-  next();
 }
 
 // -------------------------------------------------------------
@@ -187,7 +211,7 @@ function authenticate(req, res, next) {
 // -------------------------------------------------------------
 
 // 1. Register: Name, Email, Password, Confirm Password
-app.post('/api/auth/register', authLimiter, (req, res) => {
+app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
     const { name, email, password, confirmPassword } = req.body;
 
@@ -210,7 +234,7 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
     }
 
     // Check if email already registered
-    const existing = db.prepare('SELECT id FROM users WHERE email = ? COLLATE NOCASE').get(trimmedEmail);
+    const existing = await User.findOne({ email: trimmedEmail });
     if (existing) {
       return res.status(409).json({ error: 'An account with this email address already exists.' });
     }
@@ -218,19 +242,24 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
     const { hash, salt } = hashPassword(password);
     const now = new Date().toISOString();
 
-    const insertResult = db.prepare(`
-      INSERT INTO users (name, email, password_hash, salt, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(name.trim(), trimmedEmail, hash, salt, now, now);
+    const user = await User.create({
+      name: name.trim(),
+      email: trimmedEmail,
+      password_hash: hash,
+      salt,
+      created_at: now,
+      updated_at: now,
+    });
 
-    const userId = Number(insertResult.lastInsertRowid);
     const token = generateToken();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
 
-    db.prepare(`
-      INSERT INTO sessions (token, user_id, created_at, expires_at)
-      VALUES (?, ?, ?, ?)
-    `).run(token, userId, now, expiresAt);
+    await Session.create({
+      token,
+      user_id: user._id,
+      created_at: now,
+      expires_at: expiresAt,
+    });
 
     // Set HttpOnly, SameSite=Strict cookie
     setSessionCookie(req, res, token);
@@ -238,9 +267,9 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
     res.status(201).json({
       token,
       user: {
-        id: userId,
-        name: name.trim(),
-        email: trimmedEmail,
+        id: user._id.toString(),
+        name: user.name,
+        email: user.email,
         hasPin: false,
       },
     });
@@ -251,7 +280,7 @@ app.post('/api/auth/register', authLimiter, (req, res) => {
 });
 
 // 2. Login: Email and Password
-app.post('/api/auth/login', authLimiter, (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -260,7 +289,7 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
-    const user = db.prepare('SELECT * FROM users WHERE email = ? COLLATE NOCASE').get(trimmedEmail);
+    const user = await User.findOne({ email: trimmedEmail });
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
@@ -274,10 +303,12 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     const now = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
 
-    db.prepare(`
-      INSERT INTO sessions (token, user_id, created_at, expires_at)
-      VALUES (?, ?, ?, ?)
-    `).run(token, user.id, now, expiresAt);
+    await Session.create({
+      token,
+      user_id: user._id,
+      created_at: now,
+      expires_at: expiresAt,
+    });
 
     // Set HttpOnly, SameSite=Strict cookie
     setSessionCookie(req, res, token);
@@ -285,7 +316,7 @@ app.post('/api/auth/login', authLimiter, (req, res) => {
     res.json({
       token,
       user: {
-        id: user.id,
+        id: user._id.toString(),
         name: user.name,
         email: user.email,
         hasPin: !!user.pin_hash,
@@ -306,7 +337,7 @@ app.get('/api/auth/me', authenticate, (req, res) => {
 const failedPinAttempts = new Map();
 
 // 4. Logout: /api/auth/logout
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
   try {
     let token = req.cookies?.[COOKIE_NAME];
     const authHeader = req.headers['authorization'];
@@ -315,11 +346,11 @@ app.post('/api/auth/logout', (req, res) => {
     }
 
     if (token) {
-      const session = db.prepare('SELECT user_id FROM sessions WHERE token = ?').get(token);
+      const session = await Session.findOne({ token });
       if (session) {
-        failedPinAttempts.delete(session.user_id);
+        failedPinAttempts.delete(session.user_id.toString());
       }
-      db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+      await Session.deleteOne({ token });
     }
     clearSessionCookie(req, res);
     res.json({ success: true, message: 'Logged out successfully.' });
@@ -330,7 +361,7 @@ app.post('/api/auth/logout', (req, res) => {
 });
 
 // 4a. Setup 6-Digit Encryption PIN
-app.post('/api/auth/pin/setup', pinLimiter, authenticate, (req, res) => {
+app.post('/api/auth/pin/setup', pinLimiter, authenticate, async (req, res) => {
   try {
     const { pin, confirmPin } = req.body;
     const pinRegex = /^\d{6}$/;
@@ -346,11 +377,11 @@ app.post('/api/auth/pin/setup', pinLimiter, authenticate, (req, res) => {
     const { hash, salt } = hashPassword(String(pin));
     const now = new Date().toISOString();
 
-    db.prepare(`
-      UPDATE users 
-      SET pin_hash = ?, pin_salt = ?, updated_at = ?
-      WHERE id = ?
-    `).run(hash, salt, now, req.userId);
+    await User.findByIdAndUpdate(req.userId, {
+      pin_hash: hash,
+      pin_salt: salt,
+      updated_at: now,
+    });
 
     failedPinAttempts.delete(req.userId);
 
@@ -366,7 +397,7 @@ app.post('/api/auth/pin/setup', pinLimiter, authenticate, (req, res) => {
 });
 
 // 4b. Verify 6-Digit Encryption PIN (2-attempt lockout rule)
-app.post('/api/auth/pin/verify', pinLimiter, authenticate, (req, res) => {
+app.post('/api/auth/pin/verify', pinLimiter, authenticate, async (req, res) => {
   try {
     const { pin } = req.body;
     const pinRegex = /^\d{6}$/;
@@ -375,7 +406,7 @@ app.post('/api/auth/pin/verify', pinLimiter, authenticate, (req, res) => {
       return res.status(400).json({ error: 'PIN must be exactly 6 digits.' });
     }
 
-    const user = db.prepare('SELECT pin_hash, pin_salt FROM users WHERE id = ?').get(req.userId);
+    const user = await User.findById(req.userId);
     if (!user || !user.pin_hash) {
       return res.status(400).json({ error: 'No encryption PIN configured for this account.' });
     }
@@ -388,7 +419,7 @@ app.post('/api/auth/pin/verify', pinLimiter, authenticate, (req, res) => {
 
       if (attempts >= 2) {
         // Exceeded 2 attempts: revoke all sessions for this user immediately and clear cookie
-        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.userId);
+        await Session.deleteMany({ user_id: req.userId });
         failedPinAttempts.delete(req.userId);
         clearSessionCookie(req, res);
         return res.status(401).json({
@@ -418,32 +449,68 @@ app.post('/api/auth/pin/verify', pinLimiter, authenticate, (req, res) => {
 // Password Management Routes (Scoped to Authenticated User)
 // -------------------------------------------------------------
 
-function getPasswordsWithStats(userId) {
-  const query = `
-    SELECT 
-      p.id, 
-      p.password, 
-      p.note, 
-      p.created_at, 
-      p.updated_at,
-      COUNT(l.id) as practice_count,
-      SUM(CASE WHEN l.is_success = 1 THEN 1 ELSE 0 END) as success_count,
-      ROUND(AVG(l.accuracy), 1) as avg_accuracy,
-      ROUND(AVG(l.speed_cpm), 1) as avg_speed_cpm,
-      MAX(l.created_at) as last_practiced_at
-    FROM passwords p
-    LEFT JOIN practice_logs l ON p.id = l.password_id
-    WHERE p.user_id = ?
-    GROUP BY p.id
-    ORDER BY p.updated_at DESC
-  `;
-  return db.prepare(query).all(userId);
+async function getPasswordsWithStats(userId) {
+  const userObjectId = new mongoose.Types.ObjectId(userId);
+  const passwords = await Password.aggregate([
+    { $match: { user_id: userObjectId } },
+    { $sort: { updated_at: -1 } },
+    {
+      $lookup: {
+        from: 'practicelogs',
+        localField: '_id',
+        foreignField: 'password_id',
+        as: 'logs',
+      },
+    },
+    {
+      $project: {
+        id: { $toString: '$_id' },
+        password: 1,
+        note: 1,
+        blind_index: 1,
+        created_at: 1,
+        updated_at: 1,
+        practice_count: { $size: '$logs' },
+        success_count: {
+          $size: {
+            $filter: {
+              input: '$logs',
+              as: 'log',
+              cond: { $eq: ['$$log.is_success', 1] },
+            },
+          },
+        },
+        avg_accuracy: {
+          $cond: [
+            { $gt: [{ $size: '$logs' }, 0] },
+            { $round: [{ $avg: '$logs.accuracy' }, 1] },
+            null,
+          ],
+        },
+        avg_speed_cpm: {
+          $cond: [
+            { $gt: [{ $size: '$logs' }, 0] },
+            { $round: [{ $avg: '$logs.speed_cpm' }, 1] },
+            null,
+          ],
+        },
+        last_practiced_at: {
+          $cond: [
+            { $gt: [{ $size: '$logs' }, 0] },
+            { $max: '$logs.created_at' },
+            null,
+          ],
+        },
+      },
+    },
+  ]);
+  return passwords;
 }
 
 // 5. Get all passwords for authenticated user
-app.get('/api/passwords', authenticate, (req, res) => {
+app.get('/api/passwords', authenticate, async (req, res) => {
   try {
-    const passwords = getPasswordsWithStats(req.userId);
+    const passwords = await getPasswordsWithStats(req.userId);
     res.json(passwords);
   } catch (error) {
     console.error('Error fetching passwords:', error);
@@ -452,7 +519,7 @@ app.get('/api/passwords', authenticate, (req, res) => {
 });
 
 // 6. Add password (enforces uniqueness per user, supports zero-knowledge blind index)
-app.post('/api/passwords', authenticate, (req, res) => {
+app.post('/api/passwords', authenticate, async (req, res) => {
   try {
     const { password, note = '', blindIndex = null } = req.body;
 
@@ -465,9 +532,9 @@ app.post('/api/passwords', authenticate, (req, res) => {
     // Check duplicate for this user
     let existing = null;
     if (blindIndex) {
-      existing = db.prepare('SELECT id FROM passwords WHERE blind_index = ? AND user_id = ?').get(blindIndex, req.userId);
+      existing = await Password.findOne({ user_id: req.userId, blind_index: blindIndex });
     } else {
-      existing = db.prepare('SELECT id FROM passwords WHERE password = ? AND user_id = ?').get(trimmedPassword, req.userId);
+      existing = await Password.findOne({ user_id: req.userId, password: trimmedPassword });
     }
 
     if (existing) {
@@ -477,14 +544,22 @@ app.post('/api/passwords', authenticate, (req, res) => {
     }
 
     const now = new Date().toISOString();
-    const result = db.prepare(`
-      INSERT INTO passwords (user_id, password, note, blind_index, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(req.userId, trimmedPassword, (note || '').trim(), blindIndex || null, now, now);
+    const newPassword = await Password.create({
+      user_id: req.userId,
+      password: trimmedPassword,
+      note: (note || '').trim(),
+      blind_index: blindIndex || null,
+      created_at: now,
+      updated_at: now,
+    });
 
-    const newPassword = db.prepare('SELECT * FROM passwords WHERE id = ?').get(result.lastInsertRowid);
     res.status(201).json({
-      ...newPassword,
+      id: newPassword._id.toString(),
+      password: newPassword.password,
+      note: newPassword.note,
+      blind_index: newPassword.blind_index,
+      created_at: newPassword.created_at,
+      updated_at: newPassword.updated_at,
       practice_count: 0,
       success_count: 0,
       avg_accuracy: null,
@@ -498,12 +573,12 @@ app.post('/api/passwords', authenticate, (req, res) => {
 });
 
 // 7. Update password or note for authenticated user
-app.put('/api/passwords/:id', authenticate, (req, res) => {
+app.put('/api/passwords/:id', authenticate, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = req.params.id;
     const { password, note = '', blindIndex = null } = req.body;
 
-    if (isNaN(id)) {
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: 'Invalid password ID' });
     }
 
@@ -514,13 +589,11 @@ app.put('/api/passwords/:id', authenticate, (req, res) => {
     const trimmedPassword = password.trim();
 
     // Check duplicate among this user's other passwords
-    let duplicate = null;
-    if (blindIndex) {
-      duplicate = db.prepare('SELECT id FROM passwords WHERE blind_index = ? AND id != ? AND user_id = ?').get(blindIndex, id, req.userId);
-    } else {
-      duplicate = db.prepare('SELECT id FROM passwords WHERE password = ? AND id != ? AND user_id = ?').get(trimmedPassword, id, req.userId);
-    }
+    const query = blindIndex
+      ? { user_id: req.userId, blind_index: blindIndex, _id: { $ne: id } }
+      : { user_id: req.userId, password: trimmedPassword, _id: { $ne: id } };
 
+    const duplicate = await Password.findOne(query);
     if (duplicate) {
       return res.status(409).json({
         error: 'Another entry already uses this password. Duplicate passwords are not permitted.',
@@ -528,18 +601,29 @@ app.put('/api/passwords/:id', authenticate, (req, res) => {
     }
 
     const now = new Date().toISOString();
-    const result = db.prepare(`
-      UPDATE passwords 
-      SET password = ?, note = ?, blind_index = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?
-    `).run(trimmedPassword, (note || '').trim(), blindIndex || null, now, id, req.userId);
+    const updated = await Password.findOneAndUpdate(
+      { _id: id, user_id: req.userId },
+      {
+        password: trimmedPassword,
+        note: (note || '').trim(),
+        blind_index: blindIndex || null,
+        updated_at: now,
+      },
+      { new: true }
+    );
 
-    if (result.changes === 0) {
+    if (!updated) {
       return res.status(404).json({ error: 'Password not found' });
     }
 
-    const updated = db.prepare('SELECT * FROM passwords WHERE id = ?').get(id);
-    res.json(updated);
+    res.json({
+      id: updated._id.toString(),
+      password: updated.password,
+      note: updated.note,
+      blind_index: updated.blind_index,
+      created_at: updated.created_at,
+      updated_at: updated.updated_at,
+    });
   } catch (error) {
     console.error('Error updating password:', error);
     res.status(500).json({ error: 'Failed to update password' });
@@ -547,17 +631,19 @@ app.put('/api/passwords/:id', authenticate, (req, res) => {
 });
 
 // 8. Delete password
-app.delete('/api/passwords/:id', authenticate, (req, res) => {
+app.delete('/api/passwords/:id', authenticate, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    if (isNaN(id)) {
+    const id = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
       return res.status(400).json({ error: 'Invalid password ID' });
     }
 
-    const result = db.prepare('DELETE FROM passwords WHERE id = ? AND user_id = ?').run(id, req.userId);
-    if (result.changes === 0) {
+    const result = await Password.findOneAndDelete({ _id: id, user_id: req.userId });
+    if (!result) {
       return res.status(404).json({ error: 'Password not found' });
     }
+
+    await PracticeLog.updateMany({ password_id: id }, { $set: { password_id: null } });
 
     res.json({ success: true, message: 'Password deleted successfully' });
   } catch (error) {
@@ -571,17 +657,20 @@ app.delete('/api/passwords/:id', authenticate, (req, res) => {
 // -------------------------------------------------------------
 
 // 9. Start a practice session
-app.post('/api/practice/sessions', authenticate, (req, res) => {
+app.post('/api/practice/sessions', authenticate, async (req, res) => {
   try {
     const { mode_type, target_count = 1, total_items = 0 } = req.body;
     const now = new Date().toISOString();
 
-    const result = db.prepare(`
-      INSERT INTO practice_sessions (user_id, mode_type, target_count, started_at, total_items)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(req.userId, mode_type, target_count, now, total_items);
+    const session = await PracticeSession.create({
+      user_id: req.userId,
+      mode_type,
+      target_count,
+      started_at: now,
+      total_items,
+    });
 
-    res.status(201).json({ sessionId: Number(result.lastInsertRowid) });
+    res.status(201).json({ sessionId: session._id.toString() });
   } catch (error) {
     console.error('Error creating practice session:', error);
     res.status(500).json({ error: 'Failed to create practice session' });
@@ -589,7 +678,7 @@ app.post('/api/practice/sessions', authenticate, (req, res) => {
 });
 
 // 10. Record individual practice log
-app.post('/api/practice/logs', authenticate, (req, res) => {
+app.post('/api/practice/logs', authenticate, async (req, res) => {
   try {
     const {
       session_id,
@@ -607,28 +696,22 @@ app.post('/api/practice/logs', authenticate, (req, res) => {
 
     const now = new Date().toISOString();
 
-    const result = db.prepare(`
-      INSERT INTO practice_logs (
-        session_id, password_id, is_success, duration_ms,
-        accuracy, typed_length, target_length, speed_cpm,
-        speed_wpm, error_count, timed_out, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      session_id || null,
-      password_id || null,
-      is_success ? 1 : 0,
-      duration_ms || 0,
-      accuracy || 0,
-      typed_length || 0,
-      target_length || 0,
-      speed_cpm || 0,
-      speed_wpm || 0,
-      error_count || 0,
-      timed_out ? 1 : 0,
-      now
-    );
+    const log = await PracticeLog.create({
+      session_id: session_id && mongoose.Types.ObjectId.isValid(session_id) ? session_id : null,
+      password_id: password_id && mongoose.Types.ObjectId.isValid(password_id) ? password_id : null,
+      is_success: is_success ? 1 : 0,
+      duration_ms: duration_ms || 0,
+      accuracy: accuracy || 0,
+      typed_length: typed_length || 0,
+      target_length: target_length || 0,
+      speed_cpm: speed_cpm || 0,
+      speed_wpm: speed_wpm || 0,
+      error_count: error_count || 0,
+      timed_out: timed_out ? 1 : 0,
+      created_at: now,
+    });
 
-    res.status(201).json({ logId: Number(result.lastInsertRowid) });
+    res.status(201).json({ logId: log._id.toString() });
   } catch (error) {
     console.error('Error recording practice log:', error);
     res.status(500).json({ error: 'Failed to record practice log' });
@@ -636,9 +719,13 @@ app.post('/api/practice/logs', authenticate, (req, res) => {
 });
 
 // 11. Complete practice session
-app.put('/api/practice/sessions/:id', authenticate, (req, res) => {
+app.put('/api/practice/sessions/:id', authenticate, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ error: 'Invalid session ID' });
+    }
+
     const {
       total_items = 0,
       successful_items = 0,
@@ -648,11 +735,16 @@ app.put('/api/practice/sessions/:id', authenticate, (req, res) => {
 
     const now = new Date().toISOString();
 
-    db.prepare(`
-      UPDATE practice_sessions
-      SET completed_at = ?, total_items = ?, successful_items = ?, avg_accuracy = ?, avg_speed_cpm = ?
-      WHERE id = ? AND user_id = ?
-    `).run(now, total_items, successful_items, avg_accuracy, avg_speed_cpm, id, req.userId);
+    await PracticeSession.findOneAndUpdate(
+      { _id: id, user_id: req.userId },
+      {
+        completed_at: now,
+        total_items,
+        successful_items,
+        avg_accuracy,
+        avg_speed_cpm,
+      }
+    );
 
     res.json({ success: true });
   } catch (error) {
@@ -662,61 +754,89 @@ app.put('/api/practice/sessions/:id', authenticate, (req, res) => {
 });
 
 // 12. Practice Statistics & History Overview for User
-app.get('/api/practice/stats', authenticate, (req, res) => {
+app.get('/api/practice/stats', authenticate, async (req, res) => {
   try {
-    const totalSessions = db.prepare('SELECT COUNT(*) as count FROM practice_sessions WHERE user_id = ?').get(req.userId).count;
-    
-    const attemptsStats = db.prepare(`
-      SELECT 
-        COUNT(l.id) as total_attempts,
-        SUM(CASE WHEN l.is_success = 1 THEN 1 ELSE 0 END) as successful_attempts
-      FROM practice_logs l
-      JOIN practice_sessions s ON l.session_id = s.id
-      WHERE s.user_id = ?
-    `).get(req.userId);
+    const userObjectId = new mongoose.Types.ObjectId(req.userId);
+    const totalSessions = await PracticeSession.countDocuments({ user_id: req.userId });
 
-    const totalAttempts = attemptsStats.total_attempts || 0;
-    const successfulAttempts = attemptsStats.successful_attempts || 0;
-    
-    const performanceStats = db.prepare(`
-      SELECT 
-        ROUND(AVG(l.accuracy), 1) as avg_accuracy,
-        ROUND(AVG(l.speed_cpm), 1) as avg_cpm,
-        ROUND(AVG(l.speed_wpm), 1) as avg_wpm,
-        ROUND(AVG(l.duration_ms) / 1000.0, 2) as avg_duration_sec,
-        MAX(l.speed_wpm) as best_wpm
-      FROM practice_logs l
-      JOIN practice_sessions s ON l.session_id = s.id
-      WHERE s.user_id = ? AND l.is_success = 1
-    `).get(req.userId);
+    const attemptsStats = await PracticeSession.aggregate([
+      { $match: { user_id: userObjectId } },
+      {
+        $lookup: {
+          from: 'practicelogs',
+          localField: '_id',
+          foreignField: 'session_id',
+          as: 'log',
+        },
+      },
+      { $unwind: '$log' },
+      {
+        $group: {
+          _id: null,
+          total_attempts: { $sum: 1 },
+          successful_attempts: {
+            $sum: { $cond: [{ $eq: ['$log.is_success', 1] }, 1, 0] },
+          },
+        },
+      },
+    ]);
 
-    const recentSessions = db.prepare(`
-      SELECT 
-        s.id,
-        s.mode_type,
-        s.target_count,
-        s.started_at,
-        s.completed_at,
-        s.total_items,
-        s.successful_items,
-        s.avg_accuracy,
-        s.avg_speed_cpm
-      FROM practice_sessions s
-      WHERE s.user_id = ?
-      ORDER BY s.id DESC
-      LIMIT 10
-    `).all(req.userId);
+    const totalAttempts = attemptsStats[0]?.total_attempts || 0;
+    const successfulAttempts = attemptsStats[0]?.successful_attempts || 0;
+
+    const performanceStats = await PracticeSession.aggregate([
+      { $match: { user_id: userObjectId } },
+      {
+        $lookup: {
+          from: 'practicelogs',
+          localField: '_id',
+          foreignField: 'session_id',
+          as: 'log',
+        },
+      },
+      { $unwind: '$log' },
+      { $match: { 'log.is_success': 1 } },
+      {
+        $group: {
+          _id: null,
+          avg_accuracy: { $avg: '$log.accuracy' },
+          avg_cpm: { $avg: '$log.speed_cpm' },
+          avg_wpm: { $avg: '$log.speed_wpm' },
+          avg_duration_sec: { $avg: { $divide: ['$log.duration_ms', 1000] } },
+          best_wpm: { $max: '$log.speed_wpm' },
+        },
+      },
+    ]);
+
+    const perf = performanceStats[0] || {};
+
+    const recentSessionsDocs = await PracticeSession.find({ user_id: req.userId })
+      .sort({ _id: -1 })
+      .limit(10)
+      .lean();
+
+    const recentSessions = recentSessionsDocs.map((s) => ({
+      id: s._id.toString(),
+      mode_type: s.mode_type,
+      target_count: s.target_count,
+      started_at: s.started_at,
+      completed_at: s.completed_at,
+      total_items: s.total_items,
+      successful_items: s.successful_items,
+      avg_accuracy: s.avg_accuracy,
+      avg_speed_cpm: s.avg_speed_cpm,
+    }));
 
     res.json({
       totalSessions,
       totalAttempts,
       successfulAttempts,
       overallSuccessRate: totalAttempts > 0 ? Math.round((successfulAttempts / totalAttempts) * 100) : 0,
-      avgAccuracy: performanceStats?.avg_accuracy || 0,
-      avgCpm: performanceStats?.avg_cpm || 0,
-      avgWpm: performanceStats?.avg_wpm || 0,
-      bestWpm: performanceStats?.best_wpm || 0,
-      avgDurationSec: performanceStats?.avg_duration_sec || 0,
+      avgAccuracy: perf.avg_accuracy ? Math.round(perf.avg_accuracy * 10) / 10 : 0,
+      avgCpm: perf.avg_cpm ? Math.round(perf.avg_cpm * 10) / 10 : 0,
+      avgWpm: perf.avg_wpm ? Math.round(perf.avg_wpm * 10) / 10 : 0,
+      bestWpm: perf.best_wpm ? Math.round(perf.best_wpm * 10) / 10 : 0,
+      avgDurationSec: perf.avg_duration_sec ? Math.round(perf.avg_duration_sec * 100) / 100 : 0,
       recentSessions,
     });
   } catch (error) {
@@ -726,14 +846,13 @@ app.get('/api/practice/stats', authenticate, (req, res) => {
 });
 
 // 13. Clear all practice statistics and logs for User
-app.delete('/api/practice/stats', authenticate, (req, res) => {
+app.delete('/api/practice/stats', authenticate, async (req, res) => {
   try {
-    db.prepare(`
-      DELETE FROM practice_logs 
-      WHERE session_id IN (SELECT id FROM practice_sessions WHERE user_id = ?)
-    `).run(req.userId);
+    const userSessions = await PracticeSession.find({ user_id: req.userId }).select('_id');
+    const sessionIds = userSessions.map((s) => s._id);
 
-    db.prepare('DELETE FROM practice_sessions WHERE user_id = ?').run(req.userId);
+    await PracticeLog.deleteMany({ session_id: { $in: sessionIds } });
+    await PracticeSession.deleteMany({ user_id: req.userId });
 
     res.json({ success: true, message: 'Practice stats and logs cleared successfully' });
   } catch (error) {
@@ -753,6 +872,15 @@ if (!process.env.VERCEL) {
       res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
+
+  // Attempt initial DB connection
+  connectDB()
+    .then(() => {
+      console.log('[MongoDB Atlas] Connected to database.');
+    })
+    .catch((err) => {
+      console.warn('[MongoDB Atlas] Initial connection note:', err.message);
+    });
 
   app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);

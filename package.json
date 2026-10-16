@@ -1,7 +1,7 @@
 {
   "name": "pass-practice",
   "version": "1.0.0",
-  "description": "Minimalist Password Practice Web Application with SQLite",
+  "description": "Minimalist Password Practice Web Application with MongoDB Atlas",
   "type": "module",
   "engines": {
     "node": ">=22.x"
@@ -18,10 +18,12 @@
     "canvas-confetti": "^1.9.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
+    "dotenv": "^18.0.8",
     "express": "^4.21.2",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
     "lucide-react": "^1.16.0",
+    "mongoose": "^9.11.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
